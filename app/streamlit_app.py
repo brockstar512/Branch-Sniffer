@@ -18,6 +18,12 @@ import zipfile
 
 import streamlit as st
 
+# Streamlit Cloud injects secrets into st.secrets, not os.environ. The Anthropic
+# SDK reads ANTHROPIC_API_KEY from os.environ, so bridge it here BEFORE any
+# agents/harness import initializes the SDK.
+if "ANTHROPIC_API_KEY" in st.secrets:
+    os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+
 # Make the project root importable when Streamlit launches from app/.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
