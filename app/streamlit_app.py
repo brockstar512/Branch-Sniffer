@@ -150,24 +150,48 @@ def _run_turn(user_input: str) -> None:
 # --------------------------------------------------------------------------- #
 # Sidebar: repo input + four-pillars panel
 # --------------------------------------------------------------------------- #
+def _is_localhost() -> bool:
+    """True only when the app is served on localhost (i.e. local dev).
+
+    The "Local path" repo option reads the *server's* filesystem. That's useful
+    when you run ``streamlit run`` on your own machine, but once deployed (e.g.
+    Streamlit Cloud, served under a ``*.streamlit.app`` host) it can't see the
+    user's files and merely exposes the container's filesystem — so we hide it.
+    If the host can't be determined, we err on the side of "remote" and hide it.
+    """
+    try:
+        host = (st.context.headers.get("host") or "").split(":")[0].lower()
+    except Exception:  # noqa: BLE001 - any failure means "can't confirm local"
+        return False
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local")
+
+
 def _sidebar_repo_input() -> None:
     st.sidebar.header("🐕 Repo")
 
-    local_tab, github_tab, zip_tab = st.sidebar.tabs(["Local path", "GitHub URL", "Zip upload"])
+    show_local = _is_localhost()
+    labels = (["Local path"] if show_local else []) + ["GitHub URL", "Zip upload"]
+    tabs = st.sidebar.tabs(labels)
+    if show_local:
+        local_tab, github_tab, zip_tab = tabs
+    else:
+        github_tab, zip_tab = tabs
+        local_tab = None
 
-    # --- Local path ---
-    with local_tab:
-        path = st.text_input("Absolute path to a git repo", key="local_path_input")
-        if path:
-            if _is_git_repo(path):
-                st.success(f"✅ Valid git repo")
-            elif os.path.isdir(path):
-                st.error("❌ Directory exists but has no .git")
-            else:
-                st.error("❌ Not a directory")
-        if st.button("Use this repo", key="use_local", disabled=not (path and _is_git_repo(path))):
-            _set_repo(path, path)
-            st.rerun()
+    # --- Local path (local dev only; reads the server's own filesystem) ---
+    if local_tab is not None:
+        with local_tab:
+            path = st.text_input("Absolute path to a git repo", key="local_path_input")
+            if path:
+                if _is_git_repo(path):
+                    st.success(f"✅ Valid git repo")
+                elif os.path.isdir(path):
+                    st.error("❌ Directory exists but has no .git")
+                else:
+                    st.error("❌ Not a directory")
+            if st.button("Use this repo", key="use_local", disabled=not (path and _is_git_repo(path))):
+                _set_repo(path, path)
+                st.rerun()
 
     # --- GitHub URL ---
     with github_tab:
