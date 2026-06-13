@@ -49,6 +49,7 @@ from harness.materials.store import save
 from harness.telemetry.tracer import get_tracer, init_telemetry
 
 MIN_CONFIDENCE_TO_PROPOSE = 0.4
+MIN_LEGACY_CONFIDENCE = 0.75
 
 # Phrases in which the agent admits the real cause isn't in the commit it's
 # pointing at. We treat these admissions as structural signal: if the located
@@ -76,6 +77,21 @@ _SELF_UNDERMINING_PHRASES = (
     "bug likely exists",
     "not defined in this commit",
     "called by this commit",
+    # Phase 4.10: hedge-language patterns. Only compound forms — bare "might",
+    # "may", "could" appear in legitimate causal explanations and are too noisy
+    # to gate on as substrings.
+    "might still be",
+    "might also be",
+    "might be the",
+    "may still be",
+    "could still be",
+    "perhaps the",
+    "presumably",
+    "if this code",
+    "if the implementation",
+    "potentially the cause",
+    "is likely the cause",
+    "appears to be related",
 )
 
 
@@ -289,6 +305,34 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 # surface a weak guess.
                 if loc is None or loc.confidence < MIN_CONFIDENCE_TO_PROPOSE:
                     commit.status = "ruled_out"
+
+            # Legacy-specific confidence floor. Legacy candidates are
+            # low-information by design — they describe a relationship to the
+            # bug, not the bug itself. A weak legacy attribution is noise.
+            # Introduced/removed/commented_out candidates are causally specific
+            # and survive at the lower 0.4 floor; legacy must clear a higher bar.
+            kept = []
+            for commit in state.candidate_commits:
+                loc = commit.bug_location
+                if (
+                    loc is not None
+                    and loc.bug_type == "legacy"
+                    and loc.confidence < MIN_LEGACY_CONFIDENCE
+                ):
+                    bus.raise_alarm(
+                        state,
+                        type=AlarmType.LOW_CONFIDENCE_RESULT,
+                        severity="medium",
+                        recommended_action="drop candidate",
+                        context={
+                            "sha": commit.short_sha,
+                            "bug_type": "legacy",
+                            "confidence": loc.confidence,
+                        },
+                    )
+                    continue
+                kept.append(commit)
+            state.candidate_commits = kept
 
             # Structural rerank by bug_type. A commit that INTRODUCED the buggy
             # code is causally upstream of one that merely calls into it. The

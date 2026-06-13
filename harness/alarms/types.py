@@ -29,6 +29,7 @@ class AlarmType(str, Enum):
     # Behavioral
     OFF_TOPIC_DRIFT = "OFF_TOPIC_DRIFT"
     LOW_CONFIDENCE_NO_REPRO = "LOW_CONFIDENCE_NO_REPRO"
+    LOW_CONFIDENCE_RESULT = "LOW_CONFIDENCE_RESULT"  # dropped below a confidence floor (e.g. weak legacy attribution)
     RE_PROPOSED_ELIMINATED = "re_proposed_eliminated"
 
     # Safety
@@ -60,6 +61,7 @@ class Alarm(BaseModel):
             AlarmType.GAVE_UP_LOW_CONFIDENCE: "Sorry dog, couldn't sniff out the culprit with the budget we had.",
             AlarmType.OFF_TOPIC_DRIFT: "That doesn't smell like the current bug — keep sniffing this one or switch?",
             AlarmType.LOW_CONFIDENCE_NO_REPRO: "You haven't confirmed the bug reproduces — confidence capped.",
+            AlarmType.LOW_CONFIDENCE_RESULT: "Yo dog, that lead was too weak to stand on — dropping it.",
             AlarmType.RE_PROPOSED_ELIMINATED: "Hold up dog — the agent suggested something we already ruled out.",
             AlarmType.STAGE_TIMEOUT: "Stage timed out — retrying once.",
             AlarmType.SCOPE_VIOLATION: "Heads up dog — the agent tried to look outside its lane.",
