@@ -1,4 +1,4 @@
-# 🐕 Dog
+# 🐕 Branch Sniffer
 
 *"Yo dog, we sniffed out the branch."*
 
