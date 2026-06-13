@@ -1,0 +1,17 @@
+# Core schemas + state
+pydantic>=2.5,<3
+
+# Telemetry
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
+# Uncomment when shipping to a real OTel backend:
+# opentelemetry-exporter-otlp>=1.20
+
+# Agent (real implementation in Phase 2)
+anthropic>=0.30
+
+# UI + deploy (Phase 4)
+streamlit>=1.30
+
+# Phase 2: state machine for the loop
+# langgraph>=0.0.40
