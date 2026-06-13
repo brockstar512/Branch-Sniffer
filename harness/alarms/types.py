@@ -24,6 +24,7 @@ class AlarmType(str, Enum):
     HALLUCINATED_REF = "HALLUCINATED_REF"  # bad SHA or path
     HALLUCINATED_CODE = "HALLUCINATED_CODE"  # bad snippet / line range
     MISSING_SYMPTOM_LINK = "MISSING_SYMPTOM_LINK"
+    SELF_UNDERMINING_EXPLANATION = "SELF_UNDERMINING_EXPLANATION"  # agent hedged that the cause isn't here
 
     # Behavioral
     OFF_TOPIC_DRIFT = "OFF_TOPIC_DRIFT"
@@ -52,6 +53,7 @@ class Alarm(BaseModel):
             AlarmType.HALLUCINATED_REF: "Hold up dog — the agent made up a commit hash. Retrying.",
             AlarmType.HALLUCINATED_CODE: "Hold up dog — the agent cited code that isn't actually there. Retrying.",
             AlarmType.MISSING_SYMPTOM_LINK: "Yo dog, the agent didn't explain how this code causes the bug. Asking again.",
+            AlarmType.SELF_UNDERMINING_EXPLANATION: "Hold up dog — the agent admitted the real cause isn't in this commit. Dropping it.",
             AlarmType.SPEND_CEILING_REACHED: "Yo dog, we hit the spend ceiling. Halting investigation.",
             AlarmType.TOKEN_BUDGET_EXCEEDED: "Yo dog, out of tokens. Halting investigation.",
             AlarmType.CALL_LIMIT_REACHED: "Yo dog, the agent's been called too many times. Halting.",

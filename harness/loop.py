@@ -50,6 +50,32 @@ from harness.telemetry.tracer import get_tracer, init_telemetry
 
 MIN_CONFIDENCE_TO_PROPOSE = 0.4
 
+# Phrases in which the agent admits the real cause isn't in the commit it's
+# pointing at. We treat these admissions as structural signal: if the located
+# explanation undermines itself, the finding is not credible regardless of the
+# confidence number the agent attached. Matched case-insensitively as substrings.
+_SELF_UNDERMINING_PHRASES = (
+    "not in this commit",
+    "not shown in this commit",
+    "elsewhere in the codebase",
+    "lies in code not shown",
+    "likely in",
+    "may be in",
+    "could be in",
+    "no animation code",
+    "no movement logic",
+    "does not contain",
+)
+
+
+def _is_self_undermining(loc) -> bool:
+    """True if the located explanation/symptom_link/call_context hedges that the
+    actual cause is not in this commit."""
+    haystack = " ".join(
+        t for t in (loc.explanation, loc.symptom_link, loc.call_context) if t
+    ).lower()
+    return any(p in haystack for p in _SELF_UNDERMINING_PHRASES)
+
 
 def _default_guardrails() -> list[Guardrail]:
     return [
@@ -208,6 +234,19 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 state.spend_used += float(usage.get("cost", 0.0))
                 commit.bug_location = loc
 
+                # Pillar enforcement: the agent's own hedging is structural signal.
+                # If the explanation admits the cause isn't here, the located
+                # confidence is a lie — override it to 0.0 before anything reads it.
+                if loc is not None and _is_self_undermining(loc):
+                    loc.confidence = 0.0
+                    bus.raise_alarm(
+                        state,
+                        type=AlarmType.SELF_UNDERMINING_EXPLANATION,
+                        severity="high",
+                        recommended_action="drop candidate",
+                        context={"sha": commit.short_sha},
+                    )
+
                 for cp in (
                     CodeSnippetExists(),
                     LineRangeValid(),
@@ -233,7 +272,19 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                             recommended_action="retry Locate",
                             context={"sha": commit.short_sha, "checkpoint": cp.name},
                         )
+
+                # Honest-termination gate: a located cause below the confidence
+                # floor is not a finding. Rule the candidate out rather than
+                # surface a weak guess.
+                if loc is None or loc.confidence < MIN_CONFIDENCE_TO_PROPOSE:
+                    commit.status = "ruled_out"
             save(state)
+
+            # If no candidate survived the floor, we found no confident cause.
+            if not any(c.status != "ruled_out" for c in state.candidate_commits):
+                state.current_stage = Stage.EXHAUSTED_NO_RESULT
+                save(state)
+                return state
 
         # Phase 1 stops here. Subsequent stages (inspect, compare, confirm, fix)
         # are driven by user interaction in the Streamlit app and will be added

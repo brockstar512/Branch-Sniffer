@@ -344,6 +344,18 @@ class ClaudeAgent:
             "Default to \"legacy\" when you are not confident the bug was actually introduced/"
             "removed/commented out in this exact commit. \"introduced\" is the strongest claim; "
             "reserve it for the genuine origin.\n\n"
+            "## What `confidence` means\n"
+            "`confidence` is your probability that THIS commit is the actual root cause of the "
+            "reported symptom — NOT your confidence that you identified a related or "
+            "plausible-looking code path. These are different. If the code in this commit does "
+            "not itself plausibly produce the reported symptom, confidence MUST be at most 0.3, "
+            "even when you classify it as \"legacy\" and even if the commit is topically related "
+            "to the bug. Do not report high confidence for a \"legacy\" classification unless you "
+            "can point to the specific buggy mechanism in this commit's code.\n\n"
+            "The reported symptom may not exist in this codebase at all. If nothing in this "
+            "commit's code plausibly produces it, say so plainly in `explanation` and assign a "
+            "low confidence — do NOT rationalize a connection or speculate that the cause lives "
+            "in code you cannot see.\n\n"
             "Respond with JSON only — no prose, no markdown fences — an object with exactly "
             "these keys:\n"
             '  "file_path" (string, the file containing the bug),\n'
@@ -359,7 +371,9 @@ class ClaudeAgent:
             "'TakeDamage is called from Enemy.Attack and other damage sources; the bug "
             "manifests whenever the damage parameter is greater than the current health "
             "value, which happens during overkill scenarios')),\n"
-            '  "confidence" (number from 0.0 to 1.0).'
+            '  "confidence" (number from 0.0 to 1.0 — your probability that THIS commit is the '
+            "root cause of the symptom, per the rule above; at most 0.3 if this commit's code "
+            "does not itself plausibly produce the symptom)."
         )
 
         response = self.client.messages.create(
