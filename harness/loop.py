@@ -65,6 +65,17 @@ _SELF_UNDERMINING_PHRASES = (
     "no animation code",
     "no movement logic",
     "does not contain",
+    # Phase 4.9: the agent's "I'm not actually finding the cause here" hedging.
+    # Conservative additions only — phrases like "would cause" / "if this" /
+    # "delegates to" overlap with legitimate causal reasoning and are omitted.
+    "being called but not defined",
+    "called but not defined in this commit",
+    "likely exists in",
+    "actually exists in",
+    "the bug exists in",
+    "bug likely exists",
+    "not defined in this commit",
+    "called by this commit",
 )
 
 
@@ -278,6 +289,23 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 # surface a weak guess.
                 if loc is None or loc.confidence < MIN_CONFIDENCE_TO_PROPOSE:
                     commit.status = "ruled_out"
+
+            # Structural rerank by bug_type. A commit that INTRODUCED the buggy
+            # code is causally upstream of one that merely calls into it. The
+            # harness enforces this ordering because LLM ranking conflates
+            # topical proximity with causal proximity — an `introduced`
+            # candidate ranks above a `legacy` candidate even when the LLM gave
+            # the legacy candidate higher confidence. Stable sort: within a
+            # bug_type group, higher confidence still wins.
+            priority = {"introduced": 0, "removed": 1, "commented_out": 2, "legacy": 3}
+
+            def _rank_key(c):
+                loc = c.bug_location
+                if loc is None:
+                    return (99, 0.0)
+                return (priority.get(loc.bug_type, 99), -loc.confidence)
+
+            state.candidate_commits.sort(key=_rank_key)
             save(state)
 
             # If no candidate survived the floor, we found no confident cause.
