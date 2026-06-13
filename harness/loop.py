@@ -126,6 +126,9 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 return state
             candidates = agent.propose_candidates(state)
             state.calls_made += 1
+            usage = getattr(agent, "_last_usage", {})
+            state.tokens_used += int(usage.get("tokens", 0))
+            state.spend_used += float(usage.get("cost", 0.0))
             candidates = [
                 c for c in candidates if c.confidence >= MIN_CONFIDENCE_TO_PROPOSE
             ]
@@ -173,6 +176,9 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
             for commit in state.candidate_commits:
                 loc = agent.locate_bug(state, commit)
                 state.calls_made += 1
+                usage = getattr(agent, "_last_usage", {})
+                state.tokens_used += int(usage.get("tokens", 0))
+                state.spend_used += float(usage.get("cost", 0.0))
                 commit.bug_location = loc
 
                 for cp in (CodeSnippetExists(), LineRangeValid(), SymptomExplanationPresent()):
