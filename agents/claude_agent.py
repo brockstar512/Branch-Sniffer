@@ -68,6 +68,7 @@ class ClaudeAgent:
                     date=commit["date"],
                     message=commit["message"],
                     files_changed=commit["files_changed"],
+                    branch=commit.get("branch"),
                     confidence=float(item.get("confidence", 0.0)),
                     rationale=item.get("rationale", ""),
                 )
@@ -75,15 +76,53 @@ class ClaudeAgent:
         return suspects
 
     def _read_git_log(self, state: InvestigationState) -> list[dict]:
-        """Run git log and parse NUL-delimited commit records with file lists."""
+        """Scan the most-recently-active branches, dedup by SHA, drop eliminated commits.
+
+        Each returned commit dict carries a "branch" tag naming the branch it was
+        first discovered on. The first branch to contain a SHA wins; later branches
+        that share that SHA do not overwrite the tag.
+        """
+        commits: list[dict] = []
+        seen: set[str] = set()
+        for branch in self._recent_branches(state.repo_path):
+            for commit in self._log_branch(state.repo_path, branch, state.lookback_days):
+                sha = commit["sha"]
+                if sha in seen or sha in state.eliminated_shas:
+                    continue
+                seen.add(sha)
+                commit["branch"] = branch
+                commits.append(commit)
+        return commits
+
+    def _recent_branches(self, repo_path: str) -> list[str]:
+        """Up to 10 most-recently-active local branches, newest first."""
         result = subprocess.run(
             [
                 "git",
                 "-C",
-                state.repo_path,
+                repo_path,
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--count=10",
+                "refs/heads/",
+                "--format=%(refname:short)",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return [line.strip() for line in result.stdout.split("\n") if line.strip()]
+
+    def _log_branch(self, repo_path: str, branch: str, lookback_days: int) -> list[dict]:
+        """Run git log for one branch and parse delimited commit records with file lists."""
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                repo_path,
                 "log",
-                f"--since={state.lookback_days} days ago",
-                "main",
+                f"--since={lookback_days} days ago",
+                branch,
                 f"--pretty=format:%H{_FIELD_SEP}%an{_FIELD_SEP}%aI{_FIELD_SEP}%s",
                 "--name-only",
             ],

@@ -28,6 +28,7 @@ class AlarmType(str, Enum):
     # Behavioral
     OFF_TOPIC_DRIFT = "OFF_TOPIC_DRIFT"
     LOW_CONFIDENCE_NO_REPRO = "LOW_CONFIDENCE_NO_REPRO"
+    RE_PROPOSED_ELIMINATED = "re_proposed_eliminated"
 
     # Safety
     SCOPE_VIOLATION = "SCOPE_VIOLATION"
@@ -57,6 +58,7 @@ class Alarm(BaseModel):
             AlarmType.GAVE_UP_LOW_CONFIDENCE: "Sorry dog, couldn't sniff out the culprit with the budget we had.",
             AlarmType.OFF_TOPIC_DRIFT: "That doesn't smell like the current bug — keep sniffing this one or switch?",
             AlarmType.LOW_CONFIDENCE_NO_REPRO: "You haven't confirmed the bug reproduces — confidence capped.",
+            AlarmType.RE_PROPOSED_ELIMINATED: "Hold up dog — the agent suggested something we already ruled out.",
             AlarmType.STAGE_TIMEOUT: "Stage timed out — retrying once.",
             AlarmType.SCOPE_VIOLATION: "Heads up dog — the agent tried to look outside its lane.",
             AlarmType.UNVERIFIED_FIX: "Hold up dog — the proposed fix doesn't touch the culprit's files.",
