@@ -31,8 +31,9 @@ from harness.materials.state import (
 _SONNET_INPUT_COST_PER_TOKEN = 3.0 / 1_000_000
 _SONNET_OUTPUT_COST_PER_TOKEN = 15.0 / 1_000_000
 
-# NUL byte separates git-log fields so commit messages may contain pipes/tabs.
-_NUL = "\x00"
+# Literal delimiter separating git-log fields, distinctive enough not to collide
+# with commit-message content.
+_FIELD_SEP = "|||DOG|||"
 
 
 class ClaudeAgent:
@@ -83,7 +84,7 @@ class ClaudeAgent:
                 "log",
                 f"--since={state.lookback_days} days ago",
                 "main",
-                f"--pretty=format:%H{_NUL}%an{_NUL}%aI{_NUL}%s",
+                f"--pretty=format:%H{_FIELD_SEP}%an{_FIELD_SEP}%aI{_FIELD_SEP}%s",
                 "--name-only",
             ],
             capture_output=True,
@@ -94,10 +95,10 @@ class ClaudeAgent:
         commits: list[dict] = []
         current: dict | None = None
         for line in result.stdout.split("\n"):
-            if _NUL in line:
+            if _FIELD_SEP in line:
                 if current is not None:
                     commits.append(current)
-                sha, author, date_str, message = line.split(_NUL, 3)
+                sha, author, date_str, message = line.split(_FIELD_SEP, 3)
                 current = {
                     "sha": sha,
                     "author": author,
@@ -159,7 +160,13 @@ class ClaudeAgent:
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
+        self._record_usage(response)
 
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        return self._parse_ranking(text)
+
+    def _record_usage(self, response) -> None:
+        """Store token count and Sonnet-priced cost for the most recent API call."""
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         self._last_usage = {
@@ -170,20 +177,21 @@ class ClaudeAgent:
             ),
         }
 
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        return self._parse_ranking(text)
-
     @staticmethod
-    def _parse_ranking(text: str) -> list[dict]:
-        """Parse the model's JSON ranking, tolerating accidental markdown fences."""
+    def _strip_code_fences(text: str) -> str:
+        """Drop a leading ```json / ``` fence and trailing ``` if the model added them."""
         text = text.strip()
         if text.startswith("```"):
-            # Strip a leading ```json / ``` fence and the trailing ``` if present.
             text = text.split("\n", 1)[1] if "\n" in text else ""
             if text.rstrip().endswith("```"):
                 text = text.rstrip()[: -len("```")]
+        return text
+
+    @classmethod
+    def _parse_ranking(cls, text: str) -> list[dict]:
+        """Parse the model's JSON ranking, tolerating accidental markdown fences."""
         try:
-            data = json.loads(text)
+            data = json.loads(cls._strip_code_fences(text))
         except (json.JSONDecodeError, ValueError):
             return []
         if isinstance(data, list):
@@ -196,15 +204,91 @@ class ClaudeAgent:
         return []
 
     def locate_bug(self, state: InvestigationState, commit: SuspectCommit) -> BugLocation:
-        # STUB
+        diff = self._show_commit(state.repo_path, commit.sha)
+        located = self._locate_with_claude(state, commit, diff)
+        return self._build_bug_location(located, commit)
+
+    def _show_commit(self, repo_path: str, sha: str) -> str:
+        """Return the full diff for a commit via `git show <sha>`."""
+        result = subprocess.run(
+            ["git", "-C", repo_path, "show", sha],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout
+
+    def _locate_with_claude(
+        self, state: InvestigationState, commit: SuspectCommit, diff: str
+    ) -> dict:
+        """Ask Claude to pinpoint the bug within a commit's diff; record usage."""
+        bug = state.bug_report
+        scope = ", ".join(commit.files_changed) or "n/a"
+
+        prompt = (
+            "You are pinpointing the exact bug a suspect commit introduced. You are given "
+            "the bug report and the commit's diff (`git show`).\n\n"
+            "## Bug report\n"
+            f"Description: {bug.description}\n"
+            f"Symptoms: {bug.symptoms or 'n/a'}\n"
+            f"Affected area hint: {bug.affected_area_hint or 'n/a'}\n\n"
+            "## Suspect commit\n"
+            f"sha: {commit.sha}\n"
+            f"message: {commit.message}\n"
+            f"in-scope files changed: {scope}\n\n"
+            "## Diff\n"
+            f"{diff}\n\n"
+            "Identify the single most likely location of the bug. Classify how the bug was "
+            "introduced using exactly one of these `bug_type` values:\n"
+            '  - "introduced": new buggy code was added in this commit.\n'
+            '  - "removed": code that was needed was deleted in this commit.\n'
+            '  - "commented_out": working code was disabled by commenting it out.\n\n'
+            "Respond with JSON only — no prose, no markdown fences — an object with exactly "
+            "these keys:\n"
+            '  "file_path" (string, the file containing the bug),\n'
+            '  "line_range" (a two-element array [start, end] of line numbers in the new '
+            "file; for a removal, the lines surrounding the deletion),\n"
+            '  "code_snippet" (string, the relevant lines of code),\n'
+            '  "bug_type" (one of "introduced", "removed", "commented_out"),\n'
+            '  "explanation" (string, what is wrong with the code),\n'
+            '  "symptom_link" (string, how this code causes the reported symptom),\n'
+            '  "confidence" (number from 0.0 to 1.0).'
+        )
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        self._record_usage(response)
+
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        try:
+            data = json.loads(self._strip_code_fences(text))
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _build_bug_location(located: dict, commit: SuspectCommit) -> BugLocation:
+        """Coerce the model's JSON into a validated BugLocation, with safe fallbacks."""
+        line_range = located.get("line_range") or [0, 0]
+        if not (isinstance(line_range, (list, tuple)) and len(line_range) == 2):
+            line_range = [0, 0]
+
+        bug_type = located.get("bug_type")
+        if bug_type not in ("introduced", "removed", "commented_out"):
+            bug_type = "introduced"
+
         return BugLocation(
-            file_path=commit.files_changed[0] if commit.files_changed else "stub.cs",
-            line_range=(1, 1),
-            code_snippet="// stub",
-            bug_type="introduced",
-            explanation="stub: replace with real diff analysis",
-            symptom_link="stub: replace with real causal explanation linking code to symptom",
-            confidence=0.5,
+            file_path=located.get("file_path")
+            or (commit.files_changed[0] if commit.files_changed else "unknown"),
+            line_range=(int(line_range[0]), int(line_range[1])),
+            code_snippet=located.get("code_snippet", ""),
+            bug_type=bug_type,
+            explanation=located.get("explanation", ""),
+            symptom_link=located.get("symptom_link", ""),
+            confidence=float(located.get("confidence", 0.0)),
         )
 
     def compare_commits(self, sha_a: str, sha_b: str, repo_path: str) -> DiffSummary:
