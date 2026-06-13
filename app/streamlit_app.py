@@ -240,6 +240,8 @@ def _sidebar_bug_types() -> None:
             "- **introduced** — the buggy code was added in this commit\n"
             "- **removed** — a fix/guard was deleted in this commit, re-exposing the bug\n"
             "- **commented_out** — protective code was commented out, disabling the safeguard\n"
+            "- **legacy** — this commit relates to the bug (calls it, fails to fix it, "
+            "propagates it) but the buggy code existed before this commit\n"
         )
 
 

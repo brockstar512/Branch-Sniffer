@@ -39,7 +39,7 @@ class BugLocation(BaseModel):
     file_path: str
     line_range: tuple[int, int]
     code_snippet: str
-    bug_type: Literal["introduced", "removed", "commented_out"]
+    bug_type: Literal["introduced", "removed", "commented_out", "legacy"]
     explanation: str
     symptom_link: str
     call_context: str = ""  # when this code path runs + what triggers the bug

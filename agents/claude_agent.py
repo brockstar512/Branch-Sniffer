@@ -328,18 +328,29 @@ class ClaudeAgent:
             f"in-scope files changed: {scope}\n\n"
             "## Diff\n"
             f"{diff}\n\n"
-            "Identify the single most likely location of the bug. Classify how the bug was "
-            "introduced using exactly one of these `bug_type` values:\n"
-            '  - "introduced": new buggy code was added in this commit.\n'
-            '  - "removed": code that was needed was deleted in this commit.\n'
-            '  - "commented_out": working code was disabled by commenting it out.\n\n'
+            "Identify the single most likely location of the bug. Classify this commit's "
+            "relationship to the bug using exactly one of these `bug_type` values:\n"
+            '  - "introduced": the buggy code did NOT exist in the parent commit. You must '
+            "verify this by comparing this commit's diff to its parent. If you cannot confirm "
+            "the buggy pattern is absent from the parent, do NOT use this label.\n"
+            '  - "removed": a protective check, guard, or bounds-test existed in the parent '
+            "commit and was deleted in this commit, re-exposing a previously-handled bug.\n"
+            '  - "commented_out": a protective check existed in the parent and was commented '
+            "out here.\n"
+            '  - "legacy": the buggy code already existed before this commit. This commit '
+            "touches related code — calls into the buggy method, attempts an incomplete fix, "
+            "propagates the value, etc. — but did NOT introduce, remove, or comment out the "
+            "cause.\n\n"
+            "Default to \"legacy\" when you are not confident the bug was actually introduced/"
+            "removed/commented out in this exact commit. \"introduced\" is the strongest claim; "
+            "reserve it for the genuine origin.\n\n"
             "Respond with JSON only — no prose, no markdown fences — an object with exactly "
             "these keys:\n"
             '  "file_path" (string, the file containing the bug),\n'
             '  "line_range" (a two-element array [start, end] of line numbers in the new '
             "file; for a removal, the lines surrounding the deletion),\n"
             '  "code_snippet" (string, the relevant lines of code),\n'
-            '  "bug_type" (one of "introduced", "removed", "commented_out"),\n'
+            '  "bug_type" (one of "introduced", "removed", "commented_out", "legacy"),\n'
             '  "explanation" (string, what is wrong with the code),\n'
             '  "symptom_link" (string, how this code causes the reported symptom),\n'
             '  "call_context" (string, a short paragraph (2-4 sentences) describing when '
@@ -373,8 +384,9 @@ class ClaudeAgent:
             line_range = [0, 0]
 
         bug_type = located.get("bug_type")
-        if bug_type not in ("introduced", "removed", "commented_out"):
-            bug_type = "introduced"
+        if bug_type not in ("introduced", "removed", "commented_out", "legacy"):
+            # Default to the weakest claim when the model gives nothing usable.
+            bug_type = "legacy"
 
         return BugLocation(
             file_path=located.get("file_path")
