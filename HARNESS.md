@@ -121,7 +121,7 @@ call site in `loop.py` (or "not fired" where no call site exists yet — see §9
 | `MISSING_SYMPTOM_LINK` | medium |
 | `OFF_TOPIC_DRIFT` | not fired (FocusLock is a stub) |
 | `LOW_CONFIDENCE_NO_REPRO` | medium |
-| `RE_PROPOSED_ELIMINATED` | not fired (defined, no call site) |
+| `RE_PROPOSED_ELIMINATED` | high |
 | `SCOPE_VIOLATION` | high |
 | `UNVERIFIED_FIX` | not fired (fix stage not in current loop) |
 | `AMBIGUOUS_FIX` | not fired (fix stage not in current loop) |
@@ -292,9 +292,12 @@ Stated plainly:
 - **`GrepAgent.propose_candidates` returns `[]`.** The deterministic agent's candidate
   proposal is deferred (Phase 6 follow-up); `locate_bug`/`suggest_fix` return templated
   low-confidence output by design.
-- **`RE_PROPOSED_ELIMINATED` is defined but never fired.** The alarm type exists in
-  `types.py` (with dog-voice text) but has no call site in the current loop;
-  re-proposal is instead prevented upstream by `eliminated_shas` filtering.
+- **`RE_PROPOSED_ELIMINATED` fires defensively, not as the primary guard.** When the
+  agent re-proposes a SHA already in `eliminated_shas`, the loop raises this alarm (high
+  severity) and then drops the candidate (`loop.py:201–210`). Re-proposal is still
+  *prevented* upstream by `eliminated_shas` filtering — the alarm exists to make the
+  agent's mistake visible in the audit trail when it does re-propose, rather than dropping
+  it silently.
 - **Multi-turn does not persist checkpoint/alarm history across turns.** Each turn is a
   fresh investigation (new `investigation_id`) enriched with prior `eliminated_branches`
   (→ `eliminated_shas`) and `rejected_notes` (→ description). See §5.

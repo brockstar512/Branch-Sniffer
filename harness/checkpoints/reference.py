@@ -124,6 +124,14 @@ class CodeSnippetExists:
                     break
             return CheckpointResult(name=self.name, passed=ok, explanation=f"commented_out; {'found in comments' if ok else 'NOT found in comments'}")
 
+        if loc.bug_type == "legacy":
+            # The bug pre-dates this commit; the cited code wasn't necessarily
+            # changed here, so we don't require it in the diff — only that the
+            # snippet actually exists in the file at the cited SHA.
+            file_at = _git(state.repo_path, "show", f"{commit.sha}:{loc.file_path}")
+            ok = snippet_norm in self._normalize(file_at)
+            return CheckpointResult(name=self.name, passed=ok, explanation=f"legacy; snippet {'found' if ok else 'NOT found'} at {commit.short_sha}:{loc.file_path}")
+
         return CheckpointResult(name=self.name, passed=False, explanation=f"unknown bug_type: {loc.bug_type}")
 
 
