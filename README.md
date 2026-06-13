@@ -1,6 +1,7 @@
 # 🐕 Branch Sniffer
 
 *"Yo dog, we sniffed out the branch."*
+https://branch-sniffer-cbihm7dqos5csbcvp8cftm.streamlit.app/#branch-sniffer
 
 An AI-governed harness that finds the commit on `main` that broke your build — and the specific line of code inside it. The harness owns guardrails, checkpoints, materials, alarms; the agent just does the analysis.
 
