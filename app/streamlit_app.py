@@ -33,7 +33,7 @@ from harness.materials.state import (  # noqa: E402
 
 LOOKBACK_DAYS = 30
 
-st.set_page_config(page_title="Dog", page_icon="🐕", layout="wide")
+st.set_page_config(page_title="Branch Sniffer", page_icon="🐕", layout="wide")
 
 
 # --------------------------------------------------------------------------- #
@@ -233,6 +233,16 @@ def _sidebar_pillars() -> None:
                     st.caption(str(a["context"]))
 
 
+def _sidebar_bug_types() -> None:
+    """Always-visible rubric explaining how each bug_type is classified."""
+    with st.sidebar.expander("ℹ️ Bug types"):
+        st.markdown(
+            "- **introduced** — the buggy code was added in this commit\n"
+            "- **removed** — a fix/guard was deleted in this commit, re-exposing the bug\n"
+            "- **commented_out** — protective code was commented out, disabling the safeguard\n"
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Main pane: thread rendering
 # --------------------------------------------------------------------------- #
@@ -290,14 +300,17 @@ def _render_candidate(state, commit, turn_idx: int, cand_idx: int, actionable: b
                 st.markdown(f"**Bug type:** `{loc.bug_type}`")
                 if loc.code_snippet:
                     st.code(loc.code_snippet)
+                if loc.call_context:
+                    st.markdown(f"**When this gets called:** {loc.call_context}")
                 st.markdown(f"**What's wrong:** {loc.explanation or '—'}")
                 st.markdown(f"**Why it causes the symptom:** {loc.symptom_link or '—'}")
 
         if actionable:
+            st.caption("Rules a branch out of this investigation only — doesn't touch git.")
             cols = st.columns(len(commit.branches) + 1 if commit.branches else 2)
             for i, branch in enumerate(commit.branches):
                 if cols[i].button(
-                    f"🗑️ Eliminate {branch}",
+                    f"🚫 Rule out {branch}",
                     key=f"elim_{turn_idx}_{cand_idx}_{branch}",
                 ):
                     st.session_state.eliminated_branches.add(branch)
@@ -361,21 +374,22 @@ def _render_followup() -> None:
 # Main pane: entry views
 # --------------------------------------------------------------------------- #
 def _render_welcome() -> None:
-    st.title("🐕 Dog")
-    st.caption("Yo dog, let's sniff out the commit that broke your build.")
+    st.title("🐕 Branch Sniffer")
+    st.caption("Let's sniff out the commit that broke your build.")
     st.markdown(
         "**👈 Load a repo from the sidebar to get started.**\n\n"
-        "Pick one of three ways to point Dog at your code:\n"
+        "Pick one of three ways to point Branch Sniffer at your code:\n"
         "- **Local path** — an absolute path to a git repo on this machine\n"
-        "- **GitHub URL** — Dog shallow-clones it for you\n"
-        "- **Zip upload** — drop in a zipped repo and Dog finds the `.git`\n"
+        "- **GitHub URL** — Branch Sniffer shallow-clones it for you\n"
+        "- **Zip upload** — drop in a zipped repo and Branch Sniffer finds the `.git`\n"
     )
 
 
 def _render_repo_loaded() -> None:
-    st.title("🐕 Dog")
+    st.title("🐕 Branch Sniffer")
     st.markdown(f"**Repo:** `{st.session_state.repo_label}`")
     st.caption(f"resolved to `{st.session_state.repo_path}`")
+    st.caption("Read-only • the harness never modifies your repo or branches.")
 
     if not st.session_state.turns:
         st.subheader("What's the bug?")
@@ -404,6 +418,7 @@ def main() -> None:
     _sidebar_repo_input()
     if st.session_state.repo_path:
         _sidebar_pillars()
+        _sidebar_bug_types()
         _render_repo_loaded()
     else:
         _render_welcome()

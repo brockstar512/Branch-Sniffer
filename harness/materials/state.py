@@ -42,6 +42,7 @@ class BugLocation(BaseModel):
     bug_type: Literal["introduced", "removed", "commented_out"]
     explanation: str
     symptom_link: str
+    call_context: str = ""  # when this code path runs + what triggers the bug
     confidence: float = Field(ge=0.0, le=1.0)
 
 

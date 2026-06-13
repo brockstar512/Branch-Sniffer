@@ -78,12 +78,15 @@ class ClaudeAgent:
     def _read_git_log(self, state: InvestigationState) -> list[dict]:
         """Scan the most-recently-active branches, dedup by SHA, drop eliminated commits.
 
-        Each returned commit dict carries a sorted "branches" list naming every
-        scanned branch it lives on. A commit shared across branches is stored once
-        with its full branch membership aggregated.
+        Each returned commit dict carries a single-element "branches" list naming
+        its *origin* branch — the branch whose tip the SHA is closest to (fewest
+        commits between the SHA and that branch's tip). Ties are broken in favour
+        of the branch that ``for-each-ref`` lists first. The schema stays
+        ``list[str]`` so existing state files keep loading.
         """
+        recent = self._recent_branches(state.repo_path)
         by_sha: dict[str, dict] = {}
-        for branch in self._recent_branches(state.repo_path):
+        for branch in recent:
             for commit in self._log_branch(state.repo_path, branch, state.lookback_days):
                 sha = commit["sha"]
                 existing = by_sha.get(sha)
@@ -97,9 +100,38 @@ class ClaudeAgent:
         for sha, commit in by_sha.items():
             if sha in state.eliminated_shas:
                 continue
-            commit["branches"] = sorted(commit["branches"])
+            origin = self._origin_branch(state.repo_path, sha, commit["branches"], recent)
+            commit["branches"] = [origin] if origin else []
             commits.append(commit)
         return commits
+
+    def _origin_branch(
+        self, repo_path: str, sha: str, containing: set[str], order: list[str]
+    ) -> str | None:
+        """Pick the branch the SHA is closest to the tip of.
+
+        Iterate the containing branches in ``for-each-ref`` order so that ties
+        (equal distance to tip) resolve to the first-listed branch.
+        """
+        best: str | None = None
+        best_count: int | None = None
+        for branch in order:
+            if branch not in containing:
+                continue
+            count = self._distance_to_tip(repo_path, sha, branch)
+            if best_count is None or count < best_count:
+                best, best_count = branch, count
+        return best
+
+    def _distance_to_tip(self, repo_path: str, sha: str, branch: str) -> int:
+        """Number of commits between ``sha`` and ``branch``'s tip (``sha..branch``)."""
+        result = subprocess.run(
+            ["git", "-C", repo_path, "rev-list", "--count", f"{sha}..{branch}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return int(result.stdout.strip() or "0")
 
     def _recent_branches(self, repo_path: str) -> list[str]:
         """Up to 10 most-recently-active local branches, newest first."""
@@ -310,6 +342,12 @@ class ClaudeAgent:
             '  "bug_type" (one of "introduced", "removed", "commented_out"),\n'
             '  "explanation" (string, what is wrong with the code),\n'
             '  "symptom_link" (string, how this code causes the reported symptom),\n'
+            '  "call_context" (string, a short paragraph (2-4 sentences) describing when '
+            "this code path is typically invoked at runtime and what specific input values, "
+            "state conditions, or call sequences could cause the bug to manifest (e.g., "
+            "'TakeDamage is called from Enemy.Attack and other damage sources; the bug "
+            "manifests whenever the damage parameter is greater than the current health "
+            "value, which happens during overkill scenarios')),\n"
             '  "confidence" (number from 0.0 to 1.0).'
         )
 
@@ -346,6 +384,7 @@ class ClaudeAgent:
             bug_type=bug_type,
             explanation=located.get("explanation", ""),
             symptom_link=located.get("symptom_link", ""),
+            call_context=located.get("call_context", ""),
             confidence=float(located.get("confidence", 0.0)),
         )
 
