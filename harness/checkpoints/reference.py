@@ -154,3 +154,57 @@ class DiffNonempty:
     def evaluate(self, state: InvestigationState, output: Any) -> CheckpointResult:
         # output here is expected to be a DiffSummary or similar; stub returns pass
         return CheckpointResult(name=self.name, passed=True, explanation="stub")
+
+
+@dataclass
+class BranchExists:
+    """Every branch cited on a candidate must resolve in the repo."""
+    name: str = "branch_exists"
+
+    def evaluate(self, state: InvestigationState, output: SuspectCommit) -> CheckpointResult:
+        if not output.branches:
+            # No branches cited — nothing to verify, don't penalize.
+            return CheckpointResult(name=self.name, passed=True, explanation="no branches cited")
+        bad = []
+        for branch in output.branches:
+            resolved = _git(state.repo_path, "rev-parse", "--verify", branch).strip()
+            if not resolved:
+                bad.append(branch)
+        return CheckpointResult(
+            name=self.name,
+            passed=not bad,
+            explanation=f"unresolved branches: {bad}" if bad else "all branches resolve",
+        )
+
+
+@dataclass
+class ConfidenceInRange:
+    """Candidate confidence must be a probability in [0.0, 1.0]."""
+    name: str = "confidence_in_range"
+
+    def evaluate(self, state: InvestigationState, output: SuspectCommit) -> CheckpointResult:
+        ok = 0.0 <= output.confidence <= 1.0
+        return CheckpointResult(
+            name=self.name,
+            passed=ok,
+            explanation=f"confidence={output.confidence}",
+        )
+
+
+@dataclass
+class BugTypeInEnum:
+    """A located bug_type must be one of the allowed labels."""
+    name: str = "bug_type_in_enum"
+    allowed: tuple[str, ...] = ("introduced", "removed", "commented_out", "legacy")
+
+    def evaluate(self, state: InvestigationState, output: SuspectCommit) -> CheckpointResult:
+        if output.bug_location is None:
+            # No location yet — nothing to verify, don't penalize.
+            return CheckpointResult(name=self.name, passed=True, explanation="no bug_location to verify")
+        bug_type = output.bug_location.bug_type
+        ok = bug_type in self.allowed
+        return CheckpointResult(
+            name=self.name,
+            passed=ok,
+            explanation=f"bug_type={bug_type!r}; allowed={self.allowed}",
+        )

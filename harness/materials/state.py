@@ -101,6 +101,7 @@ class InvestigationState(BaseModel):
 
     # Pillar histories
     checkpoint_history: list[CheckpointResult] = Field(default_factory=list)
+    guardrail_history: list[dict[str, Any]] = Field(default_factory=list)  # serialized guardrail checks
     alarm_history: list[dict[str, Any]] = Field(default_factory=list)  # serialized Alarms
 
     # Resource accounting (drives the guardrails)

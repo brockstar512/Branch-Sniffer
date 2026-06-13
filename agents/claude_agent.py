@@ -365,6 +365,7 @@ class ClaudeAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4000,
+            temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
         self._record_usage(response)

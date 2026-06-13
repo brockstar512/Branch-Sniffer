@@ -11,12 +11,17 @@ The pillar modules will not change either way.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from agents.base import Agent
 from harness.alarms.bus import bus
 from harness.alarms.types import AlarmType
 from harness.checkpoints.reference import (
+    BranchExists,
+    BugTypeInEnum,
     CodeSnippetExists,
     CommitExists,
+    ConfidenceInRange,
     LineRangeValid,
     PathExists,
 )
@@ -69,6 +74,15 @@ def _run_guardrails(state: InvestigationState, guardrails: list[Guardrail]) -> b
             r = g.check(state)
             span.set_attribute("result", "pass" if r.passed else "fail")
             span.set_attribute("explanation", r.explanation)
+            state.guardrail_history.append(
+                {
+                    "name": r.name,
+                    "passed": r.passed,
+                    "explanation": r.explanation,
+                    "stage": state.current_stage.value,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+            )
             if not r.passed:
                 all_ok = False
                 # Map guardrail -> alarm
@@ -129,6 +143,19 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
             usage = getattr(agent, "_last_usage", {})
             state.tokens_used += int(usage.get("tokens", 0))
             state.spend_used += float(usage.get("cost", 0.0))
+
+            # Drop any candidate the user already ruled out, alarming on each.
+            re_proposed = [c for c in candidates if c.sha in state.eliminated_shas]
+            for c in re_proposed:
+                bus.raise_alarm(
+                    state,
+                    type=AlarmType.RE_PROPOSED_ELIMINATED,
+                    severity="high",
+                    recommended_action="drop and continue",
+                    context={"sha": c.sha, "short_sha": c.short_sha},
+                )
+            candidates = [c for c in candidates if c.sha not in state.eliminated_shas]
+
             candidates = [
                 c for c in candidates if c.confidence >= MIN_CONFIDENCE_TO_PROPOSE
             ]
@@ -181,7 +208,14 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 state.spend_used += float(usage.get("cost", 0.0))
                 commit.bug_location = loc
 
-                for cp in (CodeSnippetExists(), LineRangeValid(), SymptomExplanationPresent()):
+                for cp in (
+                    CodeSnippetExists(),
+                    LineRangeValid(),
+                    SymptomExplanationPresent(),
+                    BranchExists(),
+                    ConfidenceInRange(),
+                    BugTypeInEnum(),
+                ):
                     cr = cp.evaluate(state, commit)
                     state.checkpoint_history.append(cr)
                     if not cr.passed:
