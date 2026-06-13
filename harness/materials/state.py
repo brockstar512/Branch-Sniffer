@@ -31,6 +31,7 @@ class BugReport(BaseModel):
     description: str
     symptoms: Optional[str] = None
     affected_area_hint: Optional[str] = None  # e.g. "camera", "player movement"
+    stack_trace: Optional[str] = None
 
 
 class BugLocation(BaseModel):
@@ -51,7 +52,7 @@ class SuspectCommit(BaseModel):
     date: datetime
     message: str
     files_changed: list[str] = Field(default_factory=list)
-    branch: str | None = None  # which branch this commit was discovered on
+    branches: list[str] = Field(default_factory=list)  # all branches this commit lives on
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     rationale: str = ""
     bug_location: Optional[BugLocation] = None  # populated by Locate stage

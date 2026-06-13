@@ -43,6 +43,8 @@ from harness.materials.state import InvestigationState, Stage
 from harness.materials.store import save
 from harness.telemetry.tracer import get_tracer, init_telemetry
 
+MIN_CONFIDENCE_TO_PROPOSE = 0.4
+
 
 def _default_guardrails() -> list[Guardrail]:
     return [
@@ -124,7 +126,15 @@ def run(state: InvestigationState, agent: Agent) -> InvestigationState:
                 return state
             candidates = agent.propose_candidates(state)
             state.calls_made += 1
+            candidates = [
+                c for c in candidates if c.confidence >= MIN_CONFIDENCE_TO_PROPOSE
+            ]
             state.candidate_commits = candidates
+
+            if not candidates:
+                state.current_stage = Stage.EXHAUSTED_NO_RESULT
+                save(state)
+                return state
 
             # Reference checkpoints on the proposed candidates
             for cp in (CommitExists(), PathExists()):

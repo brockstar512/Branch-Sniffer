@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 
 from agents.claude_agent import ClaudeAgent
@@ -28,16 +29,34 @@ def main() -> int:
         help="File extensions in scope (default: Unity)",
     )
     parser.add_argument("--reproduced", action="store_true", help="Mark bug as reproduced")
+    parser.add_argument("--stack-trace", default=None, help="Optional stack trace for the bug")
+    parser.add_argument(
+        "--eliminate-branch",
+        action="append",
+        default=None,
+        help="Exclude all commits on this branch (repeatable)",
+    )
     args = parser.parse_args()
 
     state = InvestigationState(
-        bug_report=BugReport(description=args.bug),
+        bug_report=BugReport(description=args.bug, stack_trace=args.stack_trace),
         repo_path=args.repo,
         lookback_days=args.lookback,
         file_extension_scope=args.scope,
         focus_topic=args.bug,
         reproduced=args.reproduced if args.reproduced else None,
     )
+
+    for branch in args.eliminate_branch or []:
+        result = subprocess.run(
+            ["git", "-C", args.repo, "rev-list", branch, f"--since={args.lookback} days ago"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        state.eliminated_shas.update(
+            sha.strip() for sha in result.stdout.split("\n") if sha.strip()
+        )
 
     agent = ClaudeAgent() if args.agent == "claude" else GrepAgent()
 

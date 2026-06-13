@@ -68,7 +68,7 @@ class ClaudeAgent:
                     date=commit["date"],
                     message=commit["message"],
                     files_changed=commit["files_changed"],
-                    branch=commit.get("branch"),
+                    branches=commit.get("branches", []),
                     confidence=float(item.get("confidence", 0.0)),
                     rationale=item.get("rationale", ""),
                 )
@@ -78,20 +78,27 @@ class ClaudeAgent:
     def _read_git_log(self, state: InvestigationState) -> list[dict]:
         """Scan the most-recently-active branches, dedup by SHA, drop eliminated commits.
 
-        Each returned commit dict carries a "branch" tag naming the branch it was
-        first discovered on. The first branch to contain a SHA wins; later branches
-        that share that SHA do not overwrite the tag.
+        Each returned commit dict carries a sorted "branches" list naming every
+        scanned branch it lives on. A commit shared across branches is stored once
+        with its full branch membership aggregated.
         """
-        commits: list[dict] = []
-        seen: set[str] = set()
+        by_sha: dict[str, dict] = {}
         for branch in self._recent_branches(state.repo_path):
             for commit in self._log_branch(state.repo_path, branch, state.lookback_days):
                 sha = commit["sha"]
-                if sha in seen or sha in state.eliminated_shas:
-                    continue
-                seen.add(sha)
-                commit["branch"] = branch
-                commits.append(commit)
+                existing = by_sha.get(sha)
+                if existing is None:
+                    commit["branches"] = {branch}
+                    by_sha[sha] = commit
+                else:
+                    existing["branches"].add(branch)
+
+        commits: list[dict] = []
+        for sha, commit in by_sha.items():
+            if sha in state.eliminated_shas:
+                continue
+            commit["branches"] = sorted(commit["branches"])
+            commits.append(commit)
         return commits
 
     def _recent_branches(self, repo_path: str) -> list[str]:
@@ -174,29 +181,41 @@ class ClaudeAgent:
                 "date": c["date"].isoformat(),
                 "message": c["message"],
                 "files_changed": c["files_changed"],
+                "branches": c.get("branches", []),
             }
             for c in commits
         ]
 
+        stack_trace_section = (
+            f"## Stack trace\n{bug.stack_trace}\n\n" if bug.stack_trace else ""
+        )
+
         prompt = (
-            "You are triaging which commit on the `main` branch most likely introduced "
-            "a reported bug.\n\n"
+            "You are triaging which commit most likely introduced a reported bug.\n\n"
             "## Bug report\n"
             f"Description: {bug.description}\n"
             f"Symptoms: {bug.symptoms or 'n/a'}\n"
             f"Affected area hint: {bug.affected_area_hint or 'n/a'}\n\n"
+            f"{stack_trace_section}"
             "## Candidate commits (JSON)\n"
+            "Each commit lists the branches it lives on in its `branches` field.\n"
             f"{json.dumps(commit_payload, indent=2)}\n\n"
+            "If a stack trace is provided, use it to identify the implicated files and "
+            "lines, then reason about which branch's changes most plausibly cause the "
+            "reported symptom.\n\n"
             "Identify up to 8 commits most likely related to this bug. Respond with JSON "
             "only — no prose, no markdown fences. The JSON must be a list of objects, each "
             'with exactly these keys: "sha" (the commit sha from the list above), '
             '"confidence" (a number from 0.0 to 1.0), and "rationale" (1-2 sentences '
-            "explaining why this commit is suspicious). Order the list most-suspicious first."
+            "explaining why this commit is suspicious). Order the list most-suspicious first.\n\n"
+            "If no candidate is plausibly above 0.4 confidence, return an empty list []. "
+            "Do not manufacture suspects."
         )
 
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4000,
+            temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
         self._record_usage(response)
